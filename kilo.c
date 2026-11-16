@@ -3,11 +3,13 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 
 /***	defines ***/
+#define KILO_VERSION "0.0.1"
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 /***	data	***/
@@ -101,21 +103,75 @@ int getWindowSize(int *rows, int* cols){
 	}
 }
 
+/***	append buffer	***/
+struct abuf {
+	char *b;
+	int len;
+};
+
+
+// instead of small individual writes making it unpredictable at times.
+// we make one big write in buffer and write it out, this would avoid the annoying flickering effect.
+
+// this acts like a constructor for our abuf.
+#define ABUF_INIT {NULL, 0}
+
+void abAppend(struct abuf *ab, const char *s, int len){
+	// reallocate the char* pointer in abuf struct to current length + new length.
+	char *new = realloc(ab->b, ab->len + len);
+
+	if(new==NULL) return;
+	// append the new string a the end of existing string.
+	memcpy(&new[ab->len], s, len);
+	// update abuf and the length.
+	ab->b = new;
+	ab->len += len;
+}
+
+void abFree(struct abuf *ab){
+	// deallocate memory
+	// kind of like a destructor.
+	free(ab->b);
+}
+
 /***	output	***/
-void editorDrawRows(){
+void editorDrawRows(struct abuf *ab){
 	// printing ~ at the begining of everyline like vim.
 	int y;
 	for(y = 0; y < E.screen_rows; y++){
-		write(STDOUT_FILENO, "~", 1);
+		// display the welcome message a third of the way odwn the screen.
+		if(y==E.screen_rows/3){
+			char welcome[80];
+			int welcomelen = snprintf(welcome, sizeof(welcome), "kilo editor -- version %s", KILO_VERSION);
+			if (welcomelen > E.screen_cols) welcomelen = E.screen_cols;
+			int padding = (E.screen_cols - welcomelen) / 2;
+			if(padding){
+				abAppend(ab, "~", 1);
+				padding--;
+			}
+			while(padding--) abAppend(ab, " ", 1);
+			abAppend(ab, welcome, welcomelen);
+		} else {
+			abAppend(ab, "~", 1);
+		}
 
+
+		// clearing line by lin instead of clearing entire screen.
+		abAppend(ab, "\x1b[K", 3);
+		// <esc>[K https://vt100.net/docs/vt100-ug/chapter3.html#EL
 		if(y<E.screen_rows-1){
-			write(STDOUT_FILENO, "\r\n", 2);
+			abAppend(ab, "\r\n", 2);
 		}
 	}
 }
 
 void editorRefreshScreen(){
-	write(STDOUT_FILENO, "\x1b[2J", 4);
+	struct abuf ab = ABUF_INIT;
+
+	abAppend(&ab, "\x1b[25l", 6);
+	// escape sequence to hide cursor.
+
+	// abAppend(&ab, "\x1b[2J", 4);
 	// clears the screen. the \x1b[2J is a escape sequence.
 	// escape sequences start with a \x1b (27 in hex) followed by [
 	// here J command takes an argument and then instructs the terminal screen to clear itself.
@@ -125,15 +181,25 @@ void editorRefreshScreen(){
 
 	// VT100 User Guide (https://vt100.net/docs/vt100-ug/chapter3.html)
 
-	write(STDOUT_FILENO, "\x1b[H", 3);
+	abAppend(&ab, "\x1b[H", 3);
 	// another escape sequence, the H command takes 2 arguments and reposition's the cursor.
 	// eg the terminal is of size 80x24, to position it into center of the screen we do <esc>[12;40H
 	// multiple arguments can be separated by ;
 	// the default arguments are 1;1 so we can just type [H and it would have the same result.
 	// rows and cols start from 1 and not from 0.
 
-	editorDrawRows();
-	write(STDOUT_FILENO, "\x1b[H", 3);
+	editorDrawRows(&ab);
+	abAppend(&ab, "\x1b[H", 3);
+	// reset the cursor to begining of screen after drawing tildes.
+
+	abAppend(&ab, "\x1b[25h", 6);
+	// show the cursor after drawing the tildes
+	// the 25l and 25h might not work in some terminals (not a big problem).
+	// latest VT models: https://vt100.net/docs/vt510-rm/DECTCEM.html
+
+	// replaced write stdout individually with abAppend and wrote finally.
+	write(STDOUT_FILENO, ab.b, ab.len);
+	abFree(&ab);
 }
 
 /***	input	***/

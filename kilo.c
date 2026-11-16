@@ -56,21 +56,28 @@ char editorReadKey(){
 }
 
 int getCursorPosition(int *rows, int *cols) {
+	char buff[32];
+	// reading the values into the buffer.
+	unsigned int i = 0;
+
 	if(write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
 	// the n command (https://vt100.net/docs/vt100-ug/chapter3.html#DSR)
 	// used to query terminal for status information
 	// argument 6 asks for cursor position
-	printf("\r\n");
-	char c;
-	while(read(STDIN_FILENO, &c, 1) == 1){
-		if(iscntrl(c)){
-			printf("%d\r\n", c);
-		} else {
-			printf("%d ('%c')\r\n", c, c);
-		}
+	while(i < sizeof(buff) - 1) {
+		if(read(STDIN_FILENO, &buff[i], 1) != 1) break;
+		if(buff[i]=='R') break;
+		i++;
 	}
-	editorReadKey();
-	return -1;
+	buff[i] = '\0';
+	// here &buff[1] means, start printing from the first character and not the zeroth character.
+	// printf("\r\n&buff[1]: '%s'\r\n", &buff[1]);
+	
+	// scan if the read responded with the proper escape sequence.
+	if(buff[0]!='\x1b' || buff[1]!='[') return -1;
+	// pass the pointer of the third character to sscanf.
+	if(sscanf(&buff[2], "%d;%d", rows, cols) != 2) return -1;
+	return 0;
 }
 
 int getWindowSize(int *rows, int* cols){
@@ -78,7 +85,7 @@ int getWindowSize(int *rows, int* cols){
 	// we init the struct and then fill in values using ioctl
 	// the the meaning of TIOCGWINSZ is
 	// Terminal IOCtl Get WINdow SiZe
-	if(1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0){
+	if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0){
 		// failback incase TIOCGWINSZ doesn't work.
 		if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
 		// the escape sequence 999B (move cursor right) and 999C (move cursor down)
@@ -99,7 +106,11 @@ void editorDrawRows(){
 	// printing ~ at the begining of everyline like vim.
 	int y;
 	for(y = 0; y < E.screen_rows; y++){
-		write(STDOUT_FILENO, "~\r\n", 3);
+		write(STDOUT_FILENO, "~", 1);
+
+		if(y<E.screen_rows-1){
+			write(STDOUT_FILENO, "\r\n", 2);
+		}
 	}
 }
 

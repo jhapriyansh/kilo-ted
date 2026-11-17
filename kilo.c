@@ -14,6 +14,7 @@
 
 /***	data	***/
 struct editorConfig {
+	int cx, cy;	// cursor position
 	int screen_rows;
 	int screen_cols;
 	struct termios orig_attr;
@@ -168,7 +169,7 @@ void editorDrawRows(struct abuf *ab){
 void editorRefreshScreen(){
 	struct abuf ab = ABUF_INIT;
 
-	abAppend(&ab, "\x1b[25l", 6);
+	abAppend(&ab, "\x1b[?25l", 6);
 	// escape sequence to hide cursor.
 
 	// abAppend(&ab, "\x1b[2J", 4);
@@ -189,10 +190,17 @@ void editorRefreshScreen(){
 	// rows and cols start from 1 and not from 0.
 
 	editorDrawRows(&ab);
-	abAppend(&ab, "\x1b[H", 3);
-	// reset the cursor to begining of screen after drawing tildes.
 
-	abAppend(&ab, "\x1b[25h", 6);
+	char buff[32];
+	snprintf(buff, sizeof(buff), "\x1b[%d;%dH", E.cy+1, E.cx+1);
+	// we add plus 1 as we initialized x and y as 0 but the indexing of cols and rows in terminal starts with 1
+	abAppend(&ab, buff, strlen(buff));
+
+
+	// abAppend(&ab, "\x1b[H", 3);
+	// reset the cursor to begining of screen after drawing tildes. will be replaced with argumented H command to enable cursor movement.
+
+	abAppend(&ab, "\x1b[?25h", 6);
 	// show the cursor after drawing the tildes
 	// the 25l and 25h might not work in some terminals (not a big problem).
 	// latest VT models: https://vt100.net/docs/vt510-rm/DECTCEM.html
@@ -203,6 +211,23 @@ void editorRefreshScreen(){
 }
 
 /***	input	***/
+void editorMoveCursor(char key){
+	switch (key){
+		case 'a':
+			E.cx--;
+			break;
+		case 'd':
+			E.cx++;
+			break;
+		case 'w':
+			E.cy--;
+			break;
+		case 's':
+			E.cy++;
+			break;
+	}
+}
+
 void editorProcessKeypress(){
 	char c = editorReadKey();
 
@@ -213,13 +238,22 @@ void editorProcessKeypress(){
 			write(STDOUT_FILENO, "\x1b[H", 3);
 			exit(0);
 			break;
+		case 'w':
+		case 's':
+		case 'a':
+		case 'd':
+			editorMoveCursor(c);
+			break;
 	}
 }
 
 /***	init	***/
 void initEditor(){
-	// getting size of terminal
+	E.cx = 0;
+	E.cy = 0;
+	//setting initial cursor positions
 	if(getWindowSize(&E.screen_rows, &E.screen_cols) == -1) die("getWindowSize");
+	// getting size of terminal
 }
 
 int main() {

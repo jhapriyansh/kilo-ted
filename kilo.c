@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -25,10 +26,19 @@ enum editorKey {
 };
 
 /***    data    ***/
+
+// storing row of text
+typedef struct erow {
+        int size;
+        char * chars;
+} erow;
+
 struct editorConfig {
         int cx, cy;     // cursor position
         int screen_rows;
         int screen_cols;
+        int numrows;
+        erow row;
         struct termios orig_attr;
 };
 
@@ -161,6 +171,18 @@ int getWindowSize(int *rows, int* cols){
         }
 }
 
+/***    file i/o        ***/
+void editorOpen(){
+        char *line = "Hello World!";
+        ssize_t linelen = 13;
+
+        E.row.size = linelen;
+        E.row.chars = malloc(linelen + 1);
+        memcpy(E.row.chars, line, linelen);
+        E.row.chars[linelen] = '\0';
+        E.numrows = 1;
+}
+
 /***    append buffer   ***/
 struct abuf {
         char *b;
@@ -197,20 +219,26 @@ void editorDrawRows(struct abuf *ab){
         // printing ~ at the begining of everyline like vim.
         int y;
         for(y = 0; y < E.screen_rows; y++){
-                // display the welcome message a third of the way odwn the screen.
-                if(y==E.screen_rows/3){
-                        char welcome[80];
-                        int welcomelen = snprintf(welcome, sizeof(welcome), "kilo editor -- version %s", KILO_VERSION);
-                        if (welcomelen > E.screen_cols) welcomelen = E.screen_cols;
-                        int padding = (E.screen_cols - welcomelen) / 2;
-                        if(padding){
+                if(y >= E.numrows){
+                        // display the welcome message a third of the way odwn the screen.
+                        if(y==E.screen_rows/3){
+                                char welcome[80];
+                                int welcomelen = snprintf(welcome, sizeof(welcome), "kilo editor -- version %s", KILO_VERSION);
+                                if (welcomelen > E.screen_cols) welcomelen = E.screen_cols;
+                                int padding = (E.screen_cols - welcomelen) / 2;
+                                if(padding){
+                                        abAppend(ab, "~", 1);
+                                        padding--;
+                                }
+                                while(padding--) abAppend(ab, " ", 1);
+                                abAppend(ab, welcome, welcomelen);
+                        } else {
                                 abAppend(ab, "~", 1);
-                                padding--;
                         }
-                        while(padding--) abAppend(ab, " ", 1);
-                        abAppend(ab, welcome, welcomelen);
                 } else {
-                        abAppend(ab, "~", 1);
+                        int len = E.row.size;
+                        if(len > E.screen_cols) len = E.screen_cols;
+                        abAppend(ab, E.row.chars, len);
                 }
 
 
@@ -327,7 +355,8 @@ void editorProcessKeypress(){
 void initEditor(){
         E.cx = 0;
         E.cy = 0;
-        //setting initial cursor positions
+        E.numrows = 0;
+        // setting initial cursor positions and number of text rows.
         if(getWindowSize(&E.screen_rows, &E.screen_cols) == -1) die("getWindowSize");
         // getting size of terminal
 }
@@ -335,6 +364,7 @@ void initEditor(){
 int main() {
         enableRawMode();
         initEditor();
+        editorOpen();
 
         while(1){
                 editorRefreshScreen();
